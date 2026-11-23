@@ -1,6 +1,6 @@
 {
   "source": "hoja-work/hoja-claude-plugin",
-  "sourceCommit": "d4eaeb0f339f1c3cb299446395b9484ad9acf1f6",
+  "sourceCommit": "7c55bd1bc57658195248b23e456ab665f4a7ced2",
   "sourceVersion": "0.7.0",
   "files": {
     "server.mjs": "1bdb880a74d40c3d234adf4882f0da706c5a13baffe1358db9039a1ddad20efb",
