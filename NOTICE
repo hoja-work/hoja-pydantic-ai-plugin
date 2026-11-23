@@ -1,0 +1,7 @@
+src/pydantic_ai_hoja/_bundle/ contains the Hoja plugin runtime built by hoja-work/hoja-claude-plugin
+(https://github.com/hoja-work/hoja-claude-plugin, MIT). Each file is copied byte for byte; its source commit
+and SHA-256 hash are recorded in src/pydantic_ai_hoja/_bundle/MANIFEST.json and checked by
+`python scripts/vendor_bundle.py --check`.
+
+The bundle includes code from cloverinternational/trebol (https://github.com/cloverinternational/trebol),
+vendored unmodified by that repository.

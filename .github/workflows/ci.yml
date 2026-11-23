@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Python ${{ matrix.python }} · pydantic-ai ${{ matrix.pydantic-ai }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13"]
+        pydantic-ai: ["lowest", "latest"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Bundle matches its manifest
+        run: uv run python scripts/vendor_bundle.py --check
+      - name: Lint
+        run: uv run ruff check . && uv run ruff format --check .
+      - name: Types
+        run: uv run pyright
+      - name: Tests (latest pydantic-ai)
+        if: matrix.pydantic-ai == 'latest'
+        run: uv run pytest -q
+      - name: Tests (oldest supported pydantic-ai, 2.64)
+        if: matrix.pydantic-ai == 'lowest'
+        run: uv run --isolated --with 'pydantic-ai-slim==2.64.0' pytest -q

@@ -1,0 +1,10 @@
+{
+  "source": "hoja-work/hoja-claude-plugin",
+  "sourceCommit": "fea6d1571e958ca5cb0348da3f288611c74d2c7e",
+  "sourceVersion": "0.5.3",
+  "files": {
+    "server.mjs": "2f7ddf3acfa15af6209b6551873ad84758591ce1e2318ff4494d24ece88d6fa2",
+    "api-proxy.mjs": "fe110ef4e31f439a148b51eeac2d8c71584edcfbcef4c68a3617cdf4d3930d40",
+    "session-start.mjs": "5558af2273541bf07d700fa342447448f48e7db4d7314c66d1e8e21b7421145f"
+  }
+}

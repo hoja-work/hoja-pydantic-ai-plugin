@@ -1,0 +1,68 @@
+[project]
+name = "pydantic-ai-hoja"
+dynamic = ["version"]
+description = "Hoja for Pydantic AI: TaskManage, an evidence-checked task gate, Hoja issue sync and session traces as one capability."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Hoja" }]
+requires-python = ">=3.11"
+keywords = ["pydantic-ai", "agents", "capability", "hoja", "task-tracking", "mcp"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+    "Typing :: Typed",
+    "Framework :: Pydantic",
+]
+dependencies = ["pydantic-ai-slim>=2.64,<3"]
+
+[project.urls]
+Homepage = "https://github.com/hoja-work/hoja-pydantic-ai-plugin"
+Repository = "https://github.com/hoja-work/hoja-pydantic-ai-plugin"
+Issues = "https://github.com/hoja-work/hoja-pydantic-ai-plugin/issues"
+Changelog = "https://github.com/hoja-work/hoja-pydantic-ai-plugin/blob/main/CHANGELOG.md"
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.8", "pyright>=1.1.390"]
+
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/pydantic_ai_hoja/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pydantic_ai_hoja"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "scripts", "examples", "docs", "README.md", "CHANGELOG.md", "LICENSE", "NOTICE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = ["runtime: starts the bundled Node runtime (needs Node.js 22+)"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "PL", "PT", "C4", "RET"]
+ignore = ["PLR0913", "PLR2004", "PLC0415", "RET505"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["PLR2004", "S101"]
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.11"
+typeCheckingMode = "standard"
