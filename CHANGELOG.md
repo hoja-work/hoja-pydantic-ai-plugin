@@ -3,6 +3,16 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - 2026-11-23
+
+### Changed
+
+- Runtime bundle from hoja-claude-plugin 0.7.0 (HOJA-757). Agents register work without being reminded: each user
+  prompt carries one work-registration line (create a task, activate an open one, or root vs child when a new request
+  arrives mid-task), and when a run ends after acting work with its task unreconciled or untracked, `stop()` returns a
+  `continue_with` reminder once per turn (delivered by the existing follow-up path). Children of a filed task are
+  filed in Hoja as sub-issues by default. Session-trace syncs no longer block a hook and are throttled.
+
 ## [0.1.0] - 2026-11-23
 
 ### Added
