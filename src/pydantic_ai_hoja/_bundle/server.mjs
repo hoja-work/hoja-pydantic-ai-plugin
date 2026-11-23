@@ -1267,8 +1267,8 @@ function registerTaskManage(pi, presentation = taskManageRenderers, options = {}
     description: "Manage ordered tasks. Optional compact questions {id,text}; Saved answers for unchanged questions are reused; supply missing or replacement {question,answer,evidence} answers. Completion revalidates all evidence. Evidence uses workspace file#heading, file#Lx-Ly, or tool:<ToolName>[#<n>] for a live tool result from this session. Keep detail in files. sequential commits the successful prefix; atomic commits all or rolls back.",
     parameters: taskManageSchema,
     renderShell: "self",
-    promptSnippet: "TaskManage: track multi-step work with durable ordered tasks.",
-    promptGuidelines: [`Use TaskManage for multi-step work; keep exactly one active task when working sequentially; before starting work set the selected task status="in_progress" and active=true; after verifying a task's acceptance criteria, explicitly update it with status="completed" and activate the next unblocked task.`],
+    promptSnippet: "TaskManage: register each user request and its deliverables as durable, evidence-checked tasks.",
+    promptGuidelines: [`Use TaskManage for every user request that changes files or state (not only long work): create the task before acting, one child task per separate deliverable; keep exactly one active task when working sequentially; before starting work set the selected task status="in_progress" and active=true; after verifying a task's acceptance criteria, explicitly update it with status="completed" and activate the next unblocked task; before ending a reply, complete finished tasks or add a note saying what is left.`],
     renderCall: presentation.renderCall,
     renderResult: presentation.renderResult,
     execute: async (_id, params, signal, _onUpdate, ctx) => {
@@ -2493,7 +2493,7 @@ function replayHojaRecords(entries) {
 function metadataOf(op) {
   return isObject(op?.metadata) ? op.metadata : void 0;
 }
-function candidateFor(result, op, task, records) {
+function candidateFor(result, op, task, records, publishing = /* @__PURE__ */ new Set()) {
   const metadata = metadataOf(op);
   const flag = metadata?.hoja ?? void 0;
   if (flag !== void 0 && !PUBLISH_VALUES.includes(flag))
@@ -2517,7 +2517,9 @@ function candidateFor(result, op, task, records) {
     return {};
   }
   const parentTaskId = typeof task.parent_id === "string" && task.parent_id ? task.parent_id : void 0;
-  const major = flag === "publish" || flag === void 0 && !parentTaskId;
+  const parent = parentTaskId ? records[parentTaskId] : void 0;
+  const parentFiled = !!parentTaskId && (publishing.has(parentTaskId) || parent?.state === "linked" && !!parent.issueId && parent.lifecycle?.scope !== "adopted");
+  const major = flag === "publish" || flag === void 0 && (!parentTaskId || parentFiled);
   if (!major && !namesIssue) return {};
   return {
     candidate: {
@@ -2540,15 +2542,19 @@ function publishCandidates(params, batch, records = {}) {
   for (const op of operations) if (isObject(op) && typeof op.key === "string") byKey.set(op.key, op);
   const candidates = [];
   const rejected = [];
+  const publishing = /* @__PURE__ */ new Set();
   for (const result of results) {
     if (!isObject(result) || result.status !== "succeeded" || !isObject(result.data)) continue;
     if (result.op !== "create" && result.op !== "update") continue;
     const task = result.data.task;
     if (!isObject(task) || typeof task.id !== "string" || !task.id) continue;
     const op = byKey.get(String(result.key)) ?? { key: result.key, op: result.op, metadata: void 0 };
-    const { candidate, rejected: reason } = candidateFor(result, op, task, records);
+    const { candidate, rejected: reason } = candidateFor(result, op, task, records, publishing);
     if (reason) rejected.push({ taskId: task.id, reason });
-    else if (candidate) candidates.push(candidate);
+    else if (candidate) {
+      candidates.push(candidate);
+      if (candidate.kind === "publish" && metadataOf(candidate.op)?.hojaIssue == null) publishing.add(candidate.taskId);
+    }
   }
   return { candidates, rejected };
 }
@@ -2899,7 +2905,7 @@ function publicationNote(outcome) {
 }
 
 // vendor/trebol/extensions/hoja-mode/extension.ts
-var HOJA_RULE = `Hoja mode: for any question about work, status, priority, or what to do next, call hoja_list (or hoja_get for one identifier) before answering. Automatic publication is on: TaskManage publishes one Hoja issue per coarse task \u2014 a task with no parent, or one marked metadata {"hoja":"publish"} \u2014 and keeps steps local with metadata {"hoja":"local"} (child tasks stay local unless promoted; a promoted child is created under its parent's issue and is deferred rather than filed as a root). Acceptance questions live in the issue description, never as separate issues. The project is resolved without you naming one: this chat's hoja_project selection, else the repository\u2019s .pi/config/hoja.json. Before starting, check whether an issue already exists (hoja_list), set metadata {"hojaProject":"<exact project name>"} only for a project other than the repository\u2019s own, and {"hojaIssue":"TREBOL-123"} to reuse an existing issue. After an issue is linked, every TaskManage update keeps it current: questions and progress are rewritten inside one managed description block, and an accepted completion \u2014 every acceptance question answered with evidence \u2014 posts one evidence-bearing comment and moves the owned issue to Done. A reused or shared issue is never moved, closed or commented on: the session's work becomes a sub-issue beneath it, and for any other change to a shared issue, state it and ask the user to confirm in this conversation. Publication is automatic, so read its outcome in the TaskManage result and act on it: a no_project skip creates nothing and records the task as unfiled; the extension then runs a bounded catalog discovery and reports existing projects, and the task is retried automatically once a project is selected or named. Missing filing never blocks your work, and an unconfirmed create or completion comment is never repeated automatically. /hoja off disables publication and this guidance for the chat; hoja_list and hoja_get stay read-only.`;
+var HOJA_RULE = `Hoja mode: TaskManage tasks are this chat's Hoja issues. Register work without being asked. (1) Every user request that needs more than read-only lookups gets a task before you act: create it with status "in_progress" and active=true. A root task (no parentTaskId) files one Hoja issue. (2) A request with several deliverables gets one root task plus one child task per deliverable (parentTaskId = the root, in the same batch); children of a filed task are filed as its sub-issues. Mark only mechanical steps (run tests, commit, push) metadata {"hoja":"local"}; never mark a user request local. (3) A new user message that asks for something outside the active task gets a new root task (or a child, if it serves the same goal); never fold a new request into an unrelated task. (4) Before you end a reply, complete each finished task with answers and evidence, or add a note (addNote) saying what is left. For any question about work, status, priority or what to do next, call hoja_list (or hoja_get for one identifier) before answering. Before creating, check whether an issue already exists (hoja_list); reuse it with metadata {"hojaIssue":"TEAM-123"}: your work becomes a sub-issue beneath it, and the shared issue itself is never moved, closed or commented on; for any other change to a shared issue, state it and ask the user to confirm in this conversation. File in another project with metadata {"hojaProject":"<exact project name>"}. The project is otherwise resolved for you: this chat's hoja_project selection, else the repository\u2019s .pi/config/hoja.json, else the configured default project. Publication is automatic, so read its outcome in the TaskManage result: a no_project skip files nothing and lists candidate projects; select the owner with hoja_project and the queued tasks are filed automatically. An owned issue tracks the task's questions and progress (acceptance questions live in the issue description, never as separate issues); an accepted completion (every acceptance question answered with evidence) posts one evidence comment and moves the owned issue to Done. Missing filing never blocks your work, and an unconfirmed create or completion comment is never repeated automatically. /hoja off disables publication and this guidance for the chat; hoja_list and hoja_get stay read-only.`;
 var HOJA_ENTRY = "hoja-mode";
 var HOJA_RECOVERY_ENTRY = "hoja-recovery";
 var MAX_RECOVERY_ATTEMPTS = 2;
@@ -3905,6 +3911,8 @@ var PiShim = class {
   constructor(options) {
     this.options = options;
     this.cwd = options.cwd;
+    const project = process.env.CLAUDE_PROJECT_DIR?.trim();
+    if (project) this.evidenceRoots.push(project);
   }
   options;
   tools = /* @__PURE__ */ new Map();
@@ -3917,6 +3925,13 @@ var PiShim = class {
   cwd;
   /** Messages extensions sent to `ctx.ui.notify`; the hook bridge surfaces them where Claude Code can show them. */
   notifications = [];
+  /**
+   * Stable evidence roots for TaskManage: the directory the session started in (and CLAUDE_PROJECT_DIR). `cwd`
+   * follows every hook payload, i.e. wherever the agent's shell last `cd`-ed, and TaskManage resolves citations
+   * against it; without these, valid workspace evidence was rejected as outside_allowed_roots after a `cd` (HOJA-757).
+   * Mutated in place: registerTaskManage keeps this array by reference.
+   */
+  evidenceRoots = [];
   widgets = /* @__PURE__ */ new Map();
   /** The object handed to `registerTaskManage(pi, …)` and `registerHojaMode(pi, …)`. */
   api = {
@@ -4017,6 +4032,7 @@ var PiShim = class {
     if (sessionId === this.sessionId) return false;
     if (this.sessionId) await this.emit("session_shutdown");
     this.sessionId = sessionId;
+    if (cwd && !this.evidenceRoots.includes(cwd)) this.evidenceRoots.push(cwd);
     this.entries = [];
     const path = this.journalPath(sessionId);
     if (existsSync4(path)) {
@@ -4190,10 +4206,10 @@ function parseShellHeredoc(command, start) {
   if (i < command.length && command[i] === "\\") i++;
   if (i >= command.length) return [{ word: "", stripTabs: false }, 0, false];
   if (command[i] === "'" || command[i] === '"') {
-    const quote = command[i];
+    const quote2 = command[i];
     i++;
     const startWord2 = i;
-    while (i < command.length && command[i] !== quote) i++;
+    while (i < command.length && command[i] !== quote2) i++;
     if (i >= command.length || i === startWord2) return [{ word: "", stripTabs: false }, 0, false];
     heredoc.word = command.slice(startWord2, i);
     return [heredoc, i + 1, true];
@@ -5169,10 +5185,10 @@ function heredocOpeners(line) {
     while (j < line.length && (line[j] === " " || line[j] === "	")) j++;
     if (j < line.length && line[j] === "\\") j++;
     if (j < line.length && (line[j] === "'" || line[j] === '"')) {
-      const quote = line[j];
+      const quote2 = line[j];
       j++;
       const start = j;
-      while (j < line.length && line[j] !== quote) j++;
+      while (j < line.length && line[j] !== quote2) j++;
       if (j >= line.length) break;
       tag.word = line.slice(start, j);
       j++;
@@ -5610,6 +5626,98 @@ function evaluateTaskGateResume(input2) {
   };
 }
 
+// vendor/trebol/.pi/lib/runtime/work-registration.ts
+var WORK_REGISTRATION_HOOK = "work-registration-hook";
+var INJECTED = /^\s*(?:<(?:task-notification|cross-session-message|system-reminder|local-command-stdout|local-command-stderr|bash-stdout|bash-stderr|user-prompt-submit-hook)\b|\[SYSTEM NOTIFICATION)/i;
+var ACKNOWLEDGEMENT = /^(?:ok(?:ay)?|k|yes|yep|yeah|sure|thanks?(?: you)?|thx|ty|great|nice|cool|perfect|good|got it|continue|keep going|carry on|go on|proceed|resume)[\s.!,]*$/i;
+function isUserAuthoredPrompt(prompt) {
+  const text3 = prompt.trim();
+  return text3 !== "" && !INJECTED.test(text3);
+}
+var isAcknowledgement = (prompt) => ACKNOWLEDGEMENT.test(prompt.trim());
+function isActingCall(toolName2, params, hostReadOnly = false) {
+  if (!toolName2 || hostReadOnly) return false;
+  if (isTaskManagementTool(toolName2) || isPlanModeTool(toolName2) || isUserInteractionTool(toolName2) || isSkillTool(toolName2) || isCodeModeTool(toolName2)) return false;
+  if (isReadOnlyExplorationTool(toolName2) || isReadOnlyDomainTool(toolName2) || isReadOnlyMemoryCall(toolName2, params) || isReadOnlyVaultCall(toolName2, params)) return false;
+  if (isBashTool(toolName2)) {
+    const command = params?.command;
+    if (typeof command === "string" && isBashReadOnly(command)) return false;
+  }
+  return true;
+}
+var quote = (subject) => `"${subject.length > 80 ? `${subject.slice(0, 77)}\u2026` : subject}"`;
+var focusedOf = (tasks) => tasks.find((t) => t.status === "in_progress" && t.active === true && !t.owner);
+var openOf = (tasks) => tasks.filter((t) => (t.status === "pending" || t.status === "in_progress") && !t.owner);
+var WorkRegistrationPolicy = class {
+  turn = 0;
+  settledTurn = -1;
+  actingSinceTaskUpdate = 0;
+  actingThisTurn = 0;
+  taskToolThisTurn = false;
+  reconcileThreshold;
+  registerThreshold;
+  constructor(config = {}) {
+    this.reconcileThreshold = Math.max(1, config.reconcileThreshold ?? 2);
+    this.registerThreshold = Math.max(1, config.registerThreshold ?? 2);
+  }
+  /**
+   * Any prompt opens a turn (for the settle check); only a message the user wrote gets the registration line.
+   * Returns the line to add to the model's context, or undefined.
+   */
+  onUserPrompt(prompt, tasks) {
+    this.turn++;
+    this.actingThisTurn = 0;
+    this.taskToolThisTurn = false;
+    if (!isUserAuthoredPrompt(prompt)) return void 0;
+    const focus = focusedOf(tasks);
+    if (focus) {
+      if (isAcknowledgement(prompt)) return void 0;
+      return `[Work registration] New user message while task #${focus.id} ${quote(focus.subject)} is active. If it asks for more of the same goal, keep going (a distinct deliverable gets a child task with parentTaskId="${focus.id}", filed as a sub-issue). If it asks for anything else, create a new task for it with status "in_progress" and active=true before acting. Do not fold a new request into #${focus.id}.`;
+    }
+    const open = openOf(tasks);
+    if (open.length) {
+      const list = open.slice(0, 3).map((t) => `#${t.id} ${quote(t.subject)}`).join(", ");
+      return `[Work registration] New user message. Open tasks: ${list}${open.length > 3 ? ", \u2026" : ""}; none is active. Before acting, set the one this message continues to in_progress with active=true, or create a new task for new work.`;
+    }
+    if (isAcknowledgement(prompt)) return void 0;
+    return '[Work registration] New user message. If answering it needs more than read-only lookups, create a TaskManage task for it (status "in_progress", active=true) before acting. Give each separate deliverable its own child task (parentTaskId) so it is tracked on its own.';
+  }
+  /** Record one finished tool call. `taskManageSucceeded` is true for a TaskManage batch that succeeded. */
+  onToolResult(event) {
+    if (isTaskManagementTool(event.toolName)) {
+      if (event.taskManageSucceeded !== false && !event.failed) {
+        this.actingSinceTaskUpdate = 0;
+        this.taskToolThisTurn = true;
+      }
+      return;
+    }
+    if (!isActingCall(event.toolName, event.params, event.hostReadOnly)) return;
+    this.actingSinceTaskUpdate++;
+    this.actingThisTurn++;
+  }
+  /**
+   * The agent is about to end its turn. Returns a continuation instruction at most once per turn, or undefined.
+   * The caller delivers it the way its host continues a turn (Pi agent_before_settle, Claude Code Stop).
+   */
+  onSettle(tasks) {
+    if (this.turn === 0 || this.settledTurn === this.turn) return void 0;
+    const focus = focusedOf(tasks);
+    if (focus && this.actingThisTurn > 0 && this.actingSinceTaskUpdate >= this.reconcileThreshold) {
+      this.settledTurn = this.turn;
+      return `[Work registration] Before you end this reply, reconcile task #${focus.id} ${quote(focus.subject)} (${this.actingSinceTaskUpdate} acting tool call${this.actingSinceTaskUpdate === 1 ? "" : "s"} since its last update). If its acceptance criteria are verified, update it to status "completed" with answers and evidence. If not, keep it in_progress and add a note (addNote) saying what is done and what is left. If this reply also did work outside it, register that as its own task. Then finish your reply; the user should not have to ask for this.`;
+    }
+    if (!focus && !this.taskToolThisTurn && this.actingThisTurn >= this.registerThreshold) {
+      this.settledTurn = this.turn;
+      return `[Work registration] This reply made ${this.actingThisTurn} acting tool calls without a task, so the work is not tracked. Create a task for what you did now (one TaskManage batch: create it, then update it to "completed" with answers and evidence, or leave it in_progress with a note if work remains). Then finish your reply.`;
+    }
+    return void 0;
+  }
+  /** Visible for tests and diagnostics. */
+  state() {
+    return { turn: this.turn, settledTurn: this.settledTurn, actingSinceTaskUpdate: this.actingSinceTaskUpdate, actingThisTurn: this.actingThisTurn, taskToolThisTurn: this.taskToolThisTurn };
+  }
+};
+
 // src/agy.ts
 var BUILTINS = {
   run_command: { name: "Bash", args: (a) => ({ ...a, command: a.CommandLine ?? a.command }) },
@@ -5790,6 +5898,8 @@ var HookBridge = class {
   manager;
   pipeline;
   gateResume = new TaskGateResumeBudget();
+  /** Every user request registered and reconciled before the turn ends (vendored work-registration.ts, HOJA-757). */
+  registration = new WorkRegistrationPolicy();
   subagent = false;
   startedPostActingSession = "";
   pendingToolCallIds = /* @__PURE__ */ new Map();
@@ -5876,8 +5986,11 @@ var HookBridge = class {
       hooks.enforcement.onUserMessage(prompt);
       hooks.maintenance.onUserMessage(this.tasks(), this.pipeline.budget, session);
     }
+    if (this.host !== "antigravity") this.pipeline.pendingToolMessages = [];
     const { injected } = this.pipeline.onUserPrompt({ messageAfterReceive: this.headless, prompt });
-    return injected ? context("UserPromptSubmit", formatHookContext("user_prompt_submit", injected)) : {};
+    const line = this.registration.onUserPrompt(prompt, this.tasks());
+    const text3 = [injected, line].filter(Boolean).join("\n");
+    return text3 ? context("UserPromptSubmit", formatHookContext("user_prompt_submit", text3)) : {};
   }
   async preTool(payload) {
     const raw = String(payload.tool_name ?? "");
@@ -5914,6 +6027,13 @@ var HookBridge = class {
       await this.shim.emit("tool_result", { toolName: toolName2, toolCallId, input: params, content: [{ type: "text", text: output }], isError: failed2 });
     if (HOST_SCHEMA_LOADERS.has(toolName2)) return {};
     this.pipeline.postTool({ toolName: toolName2, params, toolCallId, failed: failed2, output });
+    if (!this.subagent) this.registration.onToolResult({
+      toolName: toolName2,
+      params,
+      failed: failed2,
+      hostReadOnly: isAdapterReadOnlyTool(toolName2, params),
+      taskManageSucceeded: !failed2 && !/^\s*(?:Error\b|\{"status":"failed")/.test(output)
+    });
     if (this.host !== "codex") return {};
     if (toolCallId && this.inFlight.has(toolCallId)) this.inFlight.delete(toolCallId);
     else this.inFlight.delete(this.inFlight.values().next().value);
@@ -5927,16 +6047,23 @@ var HookBridge = class {
   async stop(payload) {
     if (this.subagent || process.env.PI_SWARM_SUBAGENT === "1") return {};
     await this.shim.emit("turn_end");
+    await this.shim.emit("agent_settle");
     const session = this.shim.sessionId || "session";
     const messages = [...this.shim.transcript.messages()];
     const last = messages.at(-1);
     if (!(last?.role === "assistant" && last.stopReason === "stop"))
       messages.push({ role: "assistant", stopReason: "stop", content: [{ type: "text", text: String(payload.last_assistant_message ?? "") }] });
     const decision = evaluateTaskGateResume({ session, messages, taskFocused: hasFocusedTask(this.tasks()), budget: this.gateResume });
-    if (decision.action === "continue" && decision.content)
-      return this.host === "codex" ? { decision: "block", reason: decision.content } : this.host === "antigravity" ? { decision: "continue", reason: decision.content } : context("Stop", decision.content);
+    if (decision.action === "continue" && decision.content) return this.continueTurn(decision.content);
     if (decision.action === "exhausted" && decision.content) return { systemMessage: decision.content };
-    return {};
+    const reminder = this.registration.onSettle(this.tasks());
+    if (!reminder) return {};
+    this.recorder?.record(this.shim.sessionId, "WorkRegistration", { hook: WORK_REGISTRATION_HOOK, reminder });
+    return this.continueTurn(reminder);
+  }
+  /** Keep the turn going with `content` as the next instruction, in the host's own Stop wire shape. */
+  continueTurn(content) {
+    return this.host === "codex" ? { decision: "block", reason: content } : this.host === "antigravity" ? { decision: "continue", reason: content } : context("Stop", content);
   }
   async command(payload) {
     const name = normalizeCommandName(payload.command_name ?? payload.name);
@@ -7020,7 +7147,7 @@ function fitTrace(trace, limit = 8 * 1024 * 1024) {
 }
 
 // src/trace/collect.ts
-var PLUGIN_VERSION = "0.6.1";
+var PLUGIN_VERSION = "0.7.0";
 var HOJA_TASK_ENTRY2 = "hoja-task-link";
 var TASK_STATE_ENTRY = "pi-swarm-task-state";
 function hojaLinks(entries) {
@@ -7328,12 +7455,22 @@ function appendLedger(dataDir2, sessionId, entry) {
 
 // src/trace/service.ts
 var ISSUE = /^[A-Za-z0-9]+-\d+$/;
+var TURN_SYNC_INTERVAL_MS = 3e4;
+var MAX_BACKOFF_MS = 10 * 6e4;
+var MAX_COMPLETION_ATTEMPTS = 3;
 var TraceService = class {
   constructor(options) {
     this.options = options;
   }
   options;
   syncing = false;
+  /** After a failed sync, mid-reply syncs pause (30 s, doubling, capped at 10 min); end-of-reply and session-end still try. */
+  failures = 0;
+  retryAt = 0;
+  /** Background sync scheduling (`schedule`): one in flight, at most one queued, throttled mid-reply. */
+  inFlight;
+  queued;
+  lastTurnSync = 0;
   get env() {
     return this.options.env ?? process.env;
   }
@@ -7363,7 +7500,14 @@ var TraceService = class {
     const s = this.options.session();
     if (!s.id) return [];
     const links = hojaLinks(s.entries);
-    const done = new Set(readLedger(this.options.dataDir, s.id).filter((e) => e.reason === "completion").map((e) => `${e.taskId}:${e.issue}`));
+    const attempts = /* @__PURE__ */ new Map();
+    const done = /* @__PURE__ */ new Set();
+    for (const e of readLedger(this.options.dataDir, s.id)) {
+      if (e.reason !== "completion") continue;
+      const key = `${e.taskId}:${e.issue}`;
+      if (e.url) done.add(key);
+      else if ((attempts.set(key, (attempts.get(key) ?? 0) + 1).get(key) ?? 0) >= MAX_COMPLETION_ATTEMPTS) done.add(key);
+    }
     return s.tasks.filter((t) => t?.status === "completed" && links.has(String(t.id))).map((t) => ({ taskId: String(t.id), issue: links.get(String(t.id)) })).filter((p) => !done.has(`${p.taskId}:${p.issue}`));
   }
   /** After a TaskManage call: upload the trace to each issue whose task just completed. Lines for the tool result. */
@@ -7395,6 +7539,7 @@ var TraceService = class {
   async syncSession(reason) {
     if (this.options.upload === "off" || this.options.upload === "manual") return [];
     if (this.syncing || this.uploadProblem()) return [];
+    if (reason === "turn" && Date.now() < this.retryAt) return [];
     const trace = this.build();
     if (!trace || !trace.issues.length) return [];
     const prev = readFlushState(this.options.dataDir, trace.session.id);
@@ -7407,7 +7552,9 @@ var TraceService = class {
       const target2 = { graphqlUrl: resolveHojaUrl(this.env), token: resolveHojaToken(this.env), fetchImpl: this.options.fetchImpl };
       const out = [];
       try {
-        const res = await uploadSessionTrace(trace, trace.issues, target2, reason);
+        const res = await uploadSessionTrace(trace, trace.issues, target2, reason === "reply" ? "turn" : reason);
+        this.failures = 0;
+        this.retryAt = 0;
         for (const att of res.attachments) {
           appendLedger(this.options.dataDir, trace.session.id, {
             issue: att.issue,
@@ -7426,7 +7573,9 @@ var TraceService = class {
         return out;
       } catch (error) {
         if (!(error instanceof LegacyTraceEndpointError)) {
-          this.options.log?.(`session trace sync failed (${reason}): ${error.message}`);
+          this.failures++;
+          this.retryAt = Date.now() + Math.min(MAX_BACKOFF_MS, 3e4 * 2 ** (this.failures - 1));
+          this.options.log?.(`session trace sync failed (${reason}, attempt ${this.failures}): ${error.message}`);
           return [];
         }
         const uploaded = new Set(readLedger(this.options.dataDir, trace.session.id).filter((e) => e.url).map((e) => e.issue));
@@ -7450,6 +7599,35 @@ var TraceService = class {
     } finally {
       this.syncing = false;
     }
+  }
+  /**
+   * Sync in the background, off the hook's critical path (HOJA-757: an awaited sync on every PostToolBatch made the
+   * hook 7–15x slower and grew with the trace). "turn" (a tool batch settled) is throttled to one per
+   * TURN_SYNC_INTERVAL_MS; "reply" (the agent ended its reply) always runs, so the issue sees each reply's final
+   * state. One sync runs at a time; requests that arrive meanwhile collapse into one follow-up.
+   */
+  schedule(kind) {
+    if (this.options.upload === "off" || this.options.upload === "manual") return;
+    const interval = Number(this.env.HOJA_TRACE_SYNC_INTERVAL_MS ?? TURN_SYNC_INTERVAL_MS);
+    if (kind === "turn" && Date.now() - this.lastTurnSync < (Number.isFinite(interval) ? interval : TURN_SYNC_INTERVAL_MS)) return;
+    if (this.inFlight) {
+      if (kind === "reply" || !this.queued) this.queued = kind;
+      return;
+    }
+    this.lastTurnSync = Date.now();
+    this.inFlight = this.syncSession(kind).then(() => void 0, (error) => this.options.log?.(`trace sync failed: ${error.message}`)).finally(() => {
+      this.inFlight = void 0;
+      const next = this.queued;
+      this.queued = void 0;
+      if (next) {
+        this.lastTurnSync = 0;
+        this.schedule(next);
+      }
+    });
+  }
+  /** Resolves once no background sync is running or queued (tests, SessionEnd). */
+  async idle() {
+    while (this.inFlight) await this.inFlight;
   }
   contentNotice() {
     return this.options.detail === "full" ? "It includes full content (prompts, tool inputs and outputs, model responses) with secrets scrubbed; set trace_detail to metadata to send only timings, statuses and token counts." : "It includes timings, statuses and token counts only (trace_detail: metadata).";
@@ -7497,7 +7675,7 @@ var toolAliases = new Proxy({}, {
 });
 function createRuntime(options) {
   const shim2 = new PiShim(options);
-  const manager = registerTaskManage(shim2.api, taskManageRenderers, { workspaceRoot: options.cwd, toolAliases });
+  const manager = registerTaskManage(shim2.api, taskManageRenderers, { workspaceRoot: options.cwd, toolAliases, evidenceRoots: shim2.evidenceRoots });
   globalThis[TASK_MANAGER_SYMBOL] = manager;
   const tracing = options.trace?.enabled !== false;
   const recorder = tracing ? new TraceRecorder({ dataDir: options.dataDir, detail: options.trace?.detail, log: options.log }) : void 0;
@@ -7526,8 +7704,11 @@ function createRuntime(options) {
     const lines = await traces.afterTaskManage();
     return lines.length ? { content: [...event.content ?? [], { type: "text", text: lines.join("\n") }] } : void 0;
   });
-  shim2.api.on("turn_end", async () => {
-    await traces.syncSession("turn");
+  shim2.api.on("turn_end", () => {
+    traces.schedule("turn");
+  });
+  shim2.api.on("agent_settle", () => {
+    traces.schedule("reply");
   });
   shim2.api.registerCommand("trace", {
     description: "Session trace: summary (default), upload [ISSUE], path",
@@ -7706,7 +7887,7 @@ if (hostOf() === "antigravity") listen(socketPath(process.ppid), async (message)
   const event = String(message?.event ?? "");
   const out = await bridge.handle(event, message?.payload ?? {});
   if (event === "Stop") setImmediate(() => {
-    runtime.traces.syncSession("turn").then((lines) => lines.length ? void 0 : runtime.traces.run("path")).catch((error) => log(`trace sync failed: ${error.message}`));
+    runtime.traces.idle().then(() => runtime.traces.run("path")).catch((error) => log(`trace sync failed: ${error.message}`));
   });
   return out;
 }, log);
